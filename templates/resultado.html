@@ -9,10 +9,19 @@
   <title>Concluído</title>
 </head>
 <body>
+
+
+  <script>
+  function copyLink() {
+    var link = "{{ url }}";
+    navigator.clipboard.writeText(link);
+    alert("Link copiado para a área de transferência!");
+  }
+  </script>
   <div class="container text-center mt-5">
-    <img width="350px" src="https://upload.wikimedia.org/wikipedia/commons/thumb/d/d0/QR_code_for_mobile_English_Wikipedia.svg/1200px-QR_code_for_mobile_English_Wikipedia.svg.png" alt="QR Code" class="img-fluid">
-    <p>Seus arquivos estão disponíveis na url www.xvideos.com</p>
-    <button class="btn btn-primary mt-3">Copiar link</button>
+    <img width="350px" src="data:image/png;base64, {{ qr_code }}" alt="QR Code" class="img-fluid">
+    <p>Seus arquivos estão disponíveis na url {{ url }}</p>
+    <button onclick="copyLink()" class="btn btn-primary mt-3">Copiar link</button>
     </br>
     <a href="/" class="btn btn-success mt-3">voltar</a>
   </div>

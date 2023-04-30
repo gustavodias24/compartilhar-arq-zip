@@ -1,6 +1,34 @@
-from fastapi import FastAPI, Request, Form
-from fastapi.responses import HTMLResponse
+import os
+
+import base64
+import tempfile
+
+from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from typing import List
+
+from bson.objectid import ObjectId
+from io import BytesIO
+
+from zipfile import ZipFile
+
+from decouple import config
+from pymongo import MongoClient
+
+import qrcode
+
+# Configurar client mongo
+client = MongoClient(
+    "mongodb+srv://{}:{}@clusterurls.wwd3kag.mongodb.net/?retryWrites=true&w=majority".format(
+        config("USER"),
+        config("PASS")
+    )
+)
+
+# Instância do banco de dados
+db = client["zipagensdb"]
+col = db["qrcodes"]
 
 app = FastAPI()
 
@@ -12,6 +40,69 @@ async def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
+@app.get("/download/{id_arq}")
+async def get_arquivo(id_arq: str):
+    dados = col.find_one({"_id": id_arq})
+    if dados:
+        stream = BytesIO(dados.get("zip"))
+
+        # Crie uma resposta de streaming com o fluxo de bytes e o tipo MIME apropriado
+        headers = {
+            "Content-Disposition": "attachment; filename={}.zip".format(dados.get("filename"))
+        }
+
+        return StreamingResponse(stream, headers=headers, media_type="application/zip")
+    else:
+        raise HTTPException(status_code=404, detail="Arquivos não encontrados!")
+
+
 @app.post("/zipagem", response_class=HTMLResponse)
-async def zipagem(request: Request, nome_zip: str = "semNome"):
-    return templates.TemplateResponse("resultado.html", {"request": request, "nome": nome_zip.replace(" ", "")})
+async def zipagem(request: Request, nome_zip: str = Form(...), arquivos: List[UploadFile] = File(...)):
+
+    zip_file = ZipFile(nome_zip, "w")
+
+    id_aleatorio = str(ObjectId())
+
+    # Salva os arquivos em um zip
+    for arq in arquivos:
+        zip_file.writestr(arq.filename, arq.file.read())
+
+    zip_file.close()
+
+    # Geral o qr_code
+    url = "https://www.{}/download/{}".format(request.url.hostname, id_aleatorio)
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4
+    )
+    qr.add_data(url)
+    qr.make(fit=True)
+
+    img_qr = qr.make_image(fill_color="black", back_color="white")
+
+    with BytesIO() as output:
+        img_qr.save(output)
+        qr_img_bytes = output.getvalue()
+
+    # Salvar no banco de dados
+    with open(nome_zip, "rb") as file:
+        obj_salvar = {
+            "_id": id_aleatorio,
+            "url": url,
+            "zip": file.read(),
+            "qr_code": qr_img_bytes,
+            "filename": nome_zip
+        }
+
+        col.insert_one(obj_salvar)
+
+    return templates.TemplateResponse(
+        "resultado.html",
+        {"request": request,
+         "nome": nome_zip.replace(" ", ""),
+         "url": url,
+         "qr_code": base64.b64encode(qr_img_bytes).decode()
+         }
+    )
