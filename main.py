@@ -1,17 +1,16 @@
-import os
-
 import base64
-import tempfile
 
 from fastapi import FastAPI, Request, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from typing import List
 
+import bson
+
 from bson.objectid import ObjectId
 from io import BytesIO
 
-from zipfile import ZipFile
+from zipfile import ZipFile, ZIP_DEFLATED
 
 from decouple import config
 from pymongo import MongoClient
@@ -59,15 +58,16 @@ async def get_arquivo(id_arq: str):
 @app.post("/zipagem", response_class=HTMLResponse)
 async def zipagem(request: Request, nome_zip: str = Form(...), arquivos: List[UploadFile] = File(...)):
 
-    zip_file = ZipFile(nome_zip, "w")
+    # Salva os arquivos em um zip
+    buffer_zip = BytesIO()
+    with ZipFile(buffer_zip, 'w', ZIP_DEFLATED) as file:
+        for arq in arquivos:
+            file.writestr(arq.filename, arq.file.read())
+
+    buffer_zip.getvalue()
 
     id_aleatorio = str(ObjectId())
 
-    # Salva os arquivos em um zip
-    for arq in arquivos:
-        zip_file.writestr(arq.filename, arq.file.read())
-
-    zip_file.close()
 
     # Geral o qr_code
     url = "https://www.{}/download/{}".format(request.url.hostname, id_aleatorio)
@@ -87,16 +87,16 @@ async def zipagem(request: Request, nome_zip: str = Form(...), arquivos: List[Up
         qr_img_bytes = output.getvalue()
 
     # Salvar no banco de dados
-    with open(nome_zip, "rb") as file:
-        obj_salvar = {
-            "_id": id_aleatorio,
-            "url": url,
-            "zip": file.read(),
-            "qr_code": qr_img_bytes,
-            "filename": nome_zip
-        }
 
-        col.insert_one(obj_salvar)
+    obj_salvar = bson.encode({
+        "_id": id_aleatorio,
+        "url": url,
+        "zip": buffer_zip.getvalue(),
+        "qr_code": qr_img_bytes,
+        "filename": nome_zip
+    })
+
+    col.insert_one(bson.decode(obj_salvar))
 
     return templates.TemplateResponse(
         "resultado.html",
